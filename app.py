@@ -1,6 +1,6 @@
 import streamlit as st
-import json
 import time
+from typing import Tuple
 from openai import OpenAI
 from PIL import Image
 import requests
@@ -12,58 +12,61 @@ def initialize_together_client() -> OpenAI:
         base_url="https://api.together.xyz/v1"
     )
 
-def handle_api_call(func):
+def safe_api_call(func):
+    """Handle rate limits with simple retry logic"""
     max_retries = 3
-    base_delay = 2  # Start with 2 seconds delay
+    base_delay = 2
     
     for attempt in range(max_retries):
         try:
             return func()
         except Exception as e:
             if "429" in str(e) and attempt < max_retries - 1:
-                delay = base_delay * (attempt + 1)  # Increase delay with each retry
+                delay = base_delay * (attempt + 1)
                 st.warning(f"Rate limit hit. Waiting {delay} seconds before retry...")
                 time.sleep(delay)
                 continue
             raise e
     return None
 
-def generate_story_prompt(client: OpenAI, topic: str) -> dict:
-    prompt = {
-        "role": "user",
-        "content": f"""Create a story line and image prompt about: {topic}
-        Return only a JSON object with this structure:
-        {{
-            "story_line": "your story line here",
-            "image_prompt": "your image prompt here"
-        }}"""
-    }
+def generate_image(client: OpenAI, topic: str) -> str:
+    """
+    Generate an image using FLUX.1-schnell-Free model.
     
-    def make_request():
-        response = client.chat.completions.create(
-            model="meta-llama/Llama-Vision-Free",
-            messages=[prompt]
-        )
-        return json.loads(response.choices[0].message.content)
+    Args:
+        client: OpenAI client
+        topic (str): The topic for image generation.
     
-    return handle_api_call(make_request)
-
-def generate_image(client: OpenAI, prompt: str) -> str:
+    Returns:
+        str: URL of the generated image.
+    """
+    image_prompt = f"Create a vivid and detailed image about: {topic}"
+    
     def make_request():
         response = client.images.generate(
             model="black-forest-labs/FLUX.1-schnell-Free",
-            prompt=prompt,
+            prompt=image_prompt,
         )
         return response.data[0].url
     
-    return handle_api_call(make_request)
+    return safe_api_call(make_request)
 
-def generate_story(client: OpenAI, image_prompt: str, story_line: str) -> str:
-    prompt = f"""Write a short story (100 words) that combines these elements:
-    1. Scene description: {image_prompt}
-    2. Story line: {story_line}
-    Make the story vivid and descriptive, as if describing a scene from a painting."""
-
+def generate_story(client: OpenAI, image_url: str, topic: str) -> str:
+    """
+    Generate a story using Llama-Vision-Free model based on an image and topic.
+    
+    Args:
+        client: OpenAI client
+        image_url (str): URL of the image to describe.
+        topic (str): The topic for the story.
+    
+    Returns:
+        str: Generated story.
+    """
+    prompt = f"""Look at this image: {image_url}. 
+    Write an engaging and descriptive short story (about 100 words) related to the topic: {topic}.
+    Make the story vivid and captivating, incorporating visual elements from the image."""
+    
     def make_request():
         response = client.chat.completions.create(
             model="meta-llama/Llama-Vision-Free",
@@ -71,9 +74,36 @@ def generate_story(client: OpenAI, image_prompt: str, story_line: str) -> str:
         )
         return response.choices[0].message.content
     
-    return handle_api_call(make_request)
+    return safe_api_call(make_request)
 
-def display_story(image_url: str, story_line: str, story: str):
+def create_story_app(client: OpenAI, topic: str) -> Tuple[str, str]:
+    """
+    Create a story app that generates an image and a story based on a given topic.
+    
+    Args:
+        client: OpenAI client
+        topic (str): The topic for the story and image.
+    
+    Returns:
+        Tuple[str, str]: A tuple containing the image URL and the generated story.
+    """
+    # Generate image
+    image_url = generate_image(client, topic)
+    if not image_url:
+        raise Exception("Failed to generate image")
+    
+    # Add a small delay to ensure the image is processed
+    time.sleep(2)
+    
+    # Generate story based on the image
+    story = generate_story(client, image_url, topic)
+    if not story:
+        raise Exception("Failed to generate story")
+    
+    return image_url, story
+
+def display_story(image_url: str, story: str):
+    """Display the generated image and story in a two-column layout"""
     col1, col2 = st.columns([1, 1])
     
     with col1:
@@ -86,9 +116,7 @@ def display_story(image_url: str, story_line: str, story: str):
             st.write(f"Image URL: {image_url}")
     
     with col2:
-        st.write("**Story Line:**")
-        st.write(story_line)
-        st.write("**Story:**")
+        st.write("**Generated Story:**")
         st.write(story)
 
 def main():
@@ -98,34 +126,18 @@ def main():
     st.write("Generate a unique story with an AI-generated image based on your topic!")
 
     topic = st.text_input("Enter a topic for your story:", 
-                         placeholder="e.g., A magical forest where animals play musical instruments")
+                         placeholder="e.g., A cat playing the piano")
 
     if st.button("Generate Story") and topic:
         try:
             client = initialize_together_client()
             
             with st.spinner('Generating your story and image... This may take a minute.'):
-                # Generate story prompt and image prompt
-                prompts = generate_story_prompt(client, topic)
-                if not prompts:
-                    st.error("Failed to generate story prompts after retries")
-                    return
-                
-                # Generate image
-                image_url = generate_image(client, prompts["image_prompt"])
-                if not image_url:
-                    st.error("Failed to generate image after retries")
-                    return
-                
-                # Generate story
-                story = generate_story(client, prompts["image_prompt"], prompts["story_line"])
-                if not story:
-                    st.error("Failed to generate story after retries")
-                    return
+                image_url, story = create_story_app(client, topic)
             
             st.success("Story generated successfully!")
             st.markdown("---")
-            display_story(image_url, prompts["story_line"], story)
+            display_story(image_url, story)
                 
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
@@ -136,7 +148,5 @@ def main():
     st.markdown("---")
     st.markdown("Created with ❤️ By BuildFastWithAI")
 
-
 if __name__ == "__main__":
     main()
-    
