@@ -36,10 +36,11 @@ def generate_image(client: OpenAI, prompt: str) -> str:
     return response.data[0].url
 
 def generate_story(client: OpenAI, image_prompt: str, story_line: str) -> str:
-    prompt = f"""Write a story in that combines these elements:
+    prompt = f"""Write a short story (100 words) that combines these elements:
     1. Scene description: {image_prompt}
     2. Story line: {story_line}
     Make the story vivid and descriptive, as if describing a scene from a painting."""
+
 
     response = client.chat.completions.create(
         model="meta-llama/Llama-Vision-Free",
