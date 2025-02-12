@@ -32,7 +32,7 @@ def generate_story(image_url: str, topic: str):
     try:
         prompt = f"Look at this image: {image_url}. Write a short story about it related to the topic: {topic}."
         response = client.chat.completions.create(
-            model="meta-llama/Llama-Vision-Free",
+            model="meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo",
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content
