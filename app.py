@@ -11,7 +11,7 @@ client = OpenAI(
 )
 
 def generate_image(prompt: str):
-    """Generate an image using FLUX model"""
+    """Generate an image using FLUX model and return both image and URL"""
     try:
         response = client.images.generate(
             model="black-forest-labs/FLUX.1-schnell-Free",
@@ -20,15 +20,15 @@ def generate_image(prompt: str):
         # Get image URL from response
         image_url = response.data[0].url
         
-        # Load and return the image
+        # Load image and return both image and URL
         response = requests.get(image_url)
-        return Image.open(BytesIO(response.content))
+        return Image.open(BytesIO(response.content)), image_url
     except Exception as e:
         st.error(f"Failed to generate image: {str(e)}")
-        return None
+        return None, None
 
 def generate_story(image_url: str, topic: str):
-    """Generate a story using Llama model"""
+    """Generate a story using Llama model with the image URL"""
     try:
         prompt = f"Look at this image: {image_url}. Write a short story about it related to the topic: {topic}."
         response = client.chat.completions.create(
@@ -51,13 +51,13 @@ topic = st.text_input("What's your story about?", placeholder="e.g., A cat playi
 if st.button("Generate", type="primary"):
     if topic:
         with st.spinner("Creating your story..."):
-            # Generate and display image
-            image = generate_image(f"An image related to {topic}")
-            if image:
+            # Generate image and get URL
+            image, image_url = generate_image(f"An image related to {topic}")
+            if image and image_url:
                 st.image(image, caption="Generated Image")
                 
-                # Generate and display story
-                story = generate_story(image, topic)
+                # Generate and display story using the image URL
+                story = generate_story(image_url, topic)
                 if story:
                     st.write("### Your Story")
                     st.write(story)
